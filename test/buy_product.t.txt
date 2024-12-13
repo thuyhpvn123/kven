@@ -1,0 +1,172 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.19;
+
+import {console} from "forge-std/console.sol";
+import {Test} from "forge-std/Test.sol";
+import {KventureCode} from "../contracts/GenerateCode.sol";
+import {PackageInfoStruct} from "../contracts/AbstractPackage.sol";
+import {MasterPool} from "../contracts/MasterPool.sol";
+import {USDT} from "../contracts/mock-smc/USDT.sol";
+import {BinaryTree} from "../contracts/BinaryTree.sol";
+import {KVenture} from "../contracts/kventure.sol";
+import {CodePool} from "../contracts/mock-smc/code_pool.sol";
+import {Product} from "../contracts/KvenProduct.sol";
+import {KventureNft} from "../contracts/PackageNFT.sol";
+
+contract BuyProductTest is Test {
+    MasterPool public MONEY_POOL;
+    USDT public USDT_ERC;
+    KVenture public PO5;
+    KventureCode public CREATE_CODE;
+    BinaryTree public TREE;
+    CodePool public CODE_POOL;
+    Product public PRODUCT;
+    KventureNft public NFT;
+
+    address public Deployer = address(0x1510);
+
+    uint256 ONE_USDT = 1_000_000;
+
+    uint256 public currentTime = 1706683205;
+    bytes32 codeRef;
+
+    // * Test Set Up
+    address public parent = address(0x1);
+    address public child = address(0x2);
+    
+
+    constructor() {
+        vm.warp(currentTime);
+        vm.startPrank(Deployer);
+        //Deploy
+        PO5 = new KVenture();
+        USDT_ERC = new USDT();
+        MONEY_POOL = new MasterPool(address(USDT_ERC));
+        TREE = new BinaryTree(address(PO5));
+        CREATE_CODE = new KventureCode();
+        CODE_POOL = new CodePool();
+        PRODUCT = new Product();
+        NFT = new KventureNft();
+        //Call
+        //init
+        PO5.initialize(
+            address(USDT_ERC),
+            address(MONEY_POOL),
+            address(TREE),
+            Deployer,
+            Deployer,
+            Deployer,
+            address(CREATE_CODE),
+            Deployer,
+            Deployer
+        );
+        PRODUCT.initialize(
+            address(USDT_ERC),
+            address(MONEY_POOL),
+            address(CREATE_CODE),
+            address(PO5)
+        );
+        CREATE_CODE.initialize(
+            address(USDT_ERC),
+            address(MONEY_POOL),
+            address(CODE_POOL),
+            address(PRODUCT),
+            address(NFT),
+            address(PO5),
+            Deployer
+        );
+        // Set po5 is controller money pool
+        CODE_POOL.grantRole(
+            keccak256("POOL_CODE_CONTROLLER_ROLE"),
+            address(CREATE_CODE)
+        );
+        NFT.grantRole(keccak256("MINTER_ROLE"), address(CREATE_CODE));
+        MONEY_POOL.setController(address(PO5));
+        PO5.SetPackageController(address(PRODUCT));
+        vm.stopPrank();
+    }
+
+    function testSetUpTest() internal {
+        vm.startPrank(Deployer);
+        USDT_ERC.mintByController(child, 50 * ONE_USDT);
+        USDT_ERC.mintByController(parent, 50 * ONE_USDT);
+
+        PRODUCT.SetAdmin(Deployer);
+        PRODUCT.adminAddProduct(
+            "10000",
+            10000000000,
+            12077000000,
+            "ao",
+            true
+        );
+
+        vm.stopPrank();
+
+        vm.startPrank(parent);
+        USDT_ERC.approve(address(PO5), 50 * ONE_USDT);
+        PO5.Register(
+            codeRef,
+            codeRef,
+            0,
+            keccak256(abi.encodePacked(block.timestamp + 1)),
+            parent
+        );
+        bytes32 parentCodeRef = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        vm.startPrank(child);
+        USDT_ERC.approve(address(PO5), 50 * ONE_USDT);
+        PO5.Register(
+            parentCodeRef,
+            parentCodeRef,
+            0,
+            keccak256(abi.encodePacked(block.timestamp + 1)),
+            child
+        );
+        vm.stopPrank();
+    }
+
+    function testBuyProduct() public {
+        testSetUpTest();
+
+        vm.startPrank(Deployer);
+        PackageInfoStruct.Product[] memory ProductArr = PRODUCT.adminViewProduct();
+        USDT_ERC.mintByController(child, 10_000 * ONE_USDT);
+        vm.stopPrank();
+
+        vm.startPrank(child);
+        USDT_ERC.approve(address(PRODUCT), 10_000 * ONE_USDT);
+
+        // Tạo thông tin order
+        bytes32[] memory idArr = new bytes32[](1);
+        idArr[0] = ProductArr[0].id;
+        uint256[] memory quaArr = new uint256[](1);
+        quaArr[0] = 1;
+        bool[] memory lockArr = new bool[](1);
+        lockArr[0] = false;
+        bytes32[] memory codeHash = new bytes32[](1);
+        codeHash[0] = bytes32("234");
+        bytes32[][] memory codeHashes = new bytes32[][](1);
+        codeHashes[0] = codeHash;
+        bool[] memory cloudMinings = new bool[](1);
+        cloudMinings[0] = false;
+        address[] memory delegates = new address[](1);
+        delegates[0] = address(0);
+
+        // Đặt Order
+        PRODUCT.order(
+            idArr,
+            quaArr,
+            lockArr,
+            codeHashes,
+            delegates,
+            codeRef,
+            address(child)
+        );       
+        vm.stopPrank();
+
+        // Check 
+        console.log(PO5.totalRevenues(parent));
+        // assertEq(PO5.totalRevenues(parent), )
+    }
+}

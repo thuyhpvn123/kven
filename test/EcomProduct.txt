@@ -1,0 +1,1079 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.13;
+
+import {Test, console} from "forge-std/Test.sol";
+import "../contracts/interfaces/IEcomProduct.sol";
+import "../contracts/interfaces/IEcomCart.sol";
+
+import "@openzeppelin/contracts@v4.9.0/utils/Strings.sol";
+
+import {ProductContract} from "../contracts/EcomProduct.sol";
+
+contract ProductContractTest is Test {
+    ProductContract public productContract;
+    address public admin = address(this);
+
+    function setUp() public {
+        productContract = new ProductContract();
+    }
+
+    event eCreateCategory(uint256 id, string name, string description);
+    event eCreateProduct(uint256 id, createProductParams params);
+    event eCreateOrder(uint256 orderID);
+    event ESpendUsdt(
+        address indexed _to,
+        uint256 indexed _amount,
+        address indexed _receive,
+        bytes _input,
+        address[] _relatedAddresses
+    );
+    event eCreateShipping(
+        uint256 id,
+        uint256 orderID,
+        address userAddress,
+        string firstName,
+        string lastName,
+        string email,
+        string country,
+        string city,
+        string stateOrProvince,
+        string postalCode,
+        string phone,
+        string addressDetail
+    );
+
+    struct PairPrices {
+        uint256 fromPrice;
+        uint256 toPrice;
+    }
+    uint256 public currentTime = 31536001;
+
+    function test_CreateCategory() public {
+        (
+            string memory testName,
+            string memory testDescription,
+            string[] memory testUrls
+        ) = seedCategory();
+        // Expect the first category ID is 1
+        uint256 expectCategoryID = 1;
+
+        // Expect the eCreateCategory event to be emitted & log data
+        vm.expectEmit(true, true, true, true);
+        emit eCreateCategory(expectCategoryID, testName, testDescription);
+
+        productContract.createCategory(testName, testDescription, testUrls);
+
+        // Retrieve categories
+        Category memory category = productContract.getCategory(
+            expectCategoryID
+        );
+
+        // Verify the category details
+        assertEq(category.id, expectCategoryID);
+        assertEq(category.name, testName);
+        assertEq(category.description, testDescription);
+        assertEq(category.imageUrls.length, testUrls.length);
+        assertEq(category.imageUrls[0], testUrls[0]);
+        assertEq(category.imageUrls[1], testUrls[1]);
+    }
+
+    function test_CreateCategoryRequireAdmin() public {
+        vm.expectRevert(bytes("You are not allowed"));
+        vm.prank(address(0));
+        (
+            string memory testName,
+            string memory testDescription,
+            string[] memory testUrls
+        ) = seedCategory();
+        productContract.createCategory(testName, testDescription, testUrls);
+    }
+
+    function test_CreateProduct() public {
+        uint256 expectProductID = 1;
+        createProductParams memory params = generateCreateProductParams(false);
+
+        vm.expectEmit(true, true, true, true);
+        emit eCreateProduct(expectProductID, params);
+
+        productContract.createProduct(params);
+
+        verifyProduct(expectProductID, params);
+    }
+
+    function test_CreateProductRequireAdmin() public {
+        createProductParams memory params = generateCreateProductParams(false);
+        vm.expectRevert(bytes("You are not allowed"));
+        vm.prank(address(0));
+        productContract.createProduct(params);
+    }
+
+    function test_CreateProductInvalidCategory() public {
+        vm.expectRevert(bytes('{"from": "Product.sol","code": 2}'));
+        createProductParams memory params = generateCreateProductParams(true);
+        productContract.createProduct(params);
+    }
+
+    function test_CreateCart() public {
+        // TODO: test_CreateCart
+    }
+
+    function test_GetAllProducts() public {
+        seedCategories(10);
+        (createProductParams[] memory productParams, , ) = seedProducts(20);
+
+        getAllProductsParams memory params;
+        Product[] memory products = productContract.getAllProducts(params);
+
+        assertEq(products.length, productParams.length);
+        for (uint256 i = 0; i < productParams.length; i++) {
+            verifyProduct(i + 1, productParams[i]);
+        }
+    }
+
+    function test_GetAllProductsFilterByCategoryName() public {
+        seedCategories(20);
+        (, , string[] memory categoryNames) = seedProducts(20);
+
+        for (
+            uint idxCategory = 0;
+            idxCategory < categoryNames.length;
+            idxCategory++
+        ) {
+            string memory categoryName = categoryNames[idxCategory];
+
+            getAllProductsParams memory params;
+            params.categoryName = categoryName;
+            Product[] memory products = productContract.getAllProducts(params);
+            verifyProductsAndCategoryName(products, categoryName);
+        }
+    }
+
+    function verifyProductsAndCategoryName(
+        Product[] memory products,
+        string memory categoryName
+    ) public view {
+        for (uint256 i = 0; i < products.length; i++) {
+            Category memory category = productContract.getCategory(
+                products[i].params.categoryID
+            );
+            assertEq(category.name, categoryName);
+        }
+    }
+
+    function test_GetAllProductsFilterByBrandName() public {
+        seedCategories(10);
+        (, string[] memory brandNames, ) = seedProducts(20);
+
+        for (
+            uint idxBrandName = 0;
+            idxBrandName < brandNames.length;
+            idxBrandName++
+        ) {
+            string memory brandName = brandNames[idxBrandName];
+
+            getAllProductsParams memory params;
+            params.brandName = brandName;
+            Product[] memory products = productContract.getAllProducts(params);
+            verifyProductsAndBrandName(products, brandName);
+        }
+    }
+
+    function verifyProductsAndBrandName(
+        Product[] memory products,
+        string memory brandName
+    ) public pure {
+        for (uint256 i = 0; i < products.length; i++) {
+            assertEq(products[i].params.brandName, brandName);
+        }
+    }
+
+    function test_GetAllProductsFilterByPrices() public {
+        seedCategories(10);
+        seedProducts(20);
+        /**
+            After seeding products, the price of each product will increase sequentially by 1000 units.
+            Like: 0 - 1000 - 2000 - 3000 ...
+         */
+        PairPrices[] memory prices = new PairPrices[](4);
+        prices[0].fromPrice = 0;
+        prices[0].toPrice = 3000;
+        prices[1].fromPrice = 2000;
+        prices[1].toPrice = 0;
+        prices[2].fromPrice = 1000;
+        prices[2].toPrice = 4000;
+
+        for (uint idxPrice = 0; idxPrice < prices.length; idxPrice++) {
+            PairPrices memory price = prices[idxPrice];
+
+            getAllProductsParams memory params;
+            params.fromPrice = price.fromPrice;
+            params.toPrice = price.toPrice;
+
+            Product[] memory products = productContract.getAllProducts(params);
+            verifyProductsAndPrice(products, price);
+        }
+    }
+
+    function verifyProductsAndPrice(
+        Product[] memory products,
+        PairPrices memory price
+    ) public pure {
+        for (uint256 i = 0; i < products.length; i++) {
+            if (price.fromPrice > 0) {
+                assertLt(price.fromPrice, products[i].params.retailPrice);
+            }
+
+            if (price.toPrice > 0) {
+                assertLt(products[i].params.retailPrice, price.toPrice);
+            }
+        }
+    }
+
+    function verifyProduct(
+        uint256 productId,
+        createProductParams memory params
+    ) public view {
+        Product memory product = productContract.getProduct(productId);
+
+        // Verify the product details
+        assertEq(product.id, productId);
+
+        assertEq(product.params.name, params.name);
+        assertEq(product.params.categoryID, params.categoryID);
+        assertEq(product.params.retailPrice, params.retailPrice);
+        assertEq(product.params.vipPrice, params.vipPrice);
+        assertEq(product.params.memberPrice, params.memberPrice);
+        assertEq(product.params.reward, params.reward);
+        assertEq(product.params.capacity, params.capacity);
+        assertEq(product.params.quantity, params.quantity);
+        assertEq(product.params.color, params.color);
+        assertEq(product.params.retailer, params.retailer);
+        assertEq(product.params.brandName, params.brandName);
+        assertEq(product.params.images, params.images);
+        assertEq(product.params.videoUrl, params.videoUrl);
+        assertEq(product.params.expiryTime, params.expiryTime);
+        assertEq(product.params.activateTime, params.activateTime);
+        assertEq(product.params.isMultipleDiscount, params.isMultipleDiscount);
+    }
+
+    function test_CreateShippingInfo() public {
+        ShippingParams memory shippingParams = generateShippingParams();
+        uint256 orderID = 1;
+        address user = address(0);
+
+        vm.expectEmit(true, true, true, true);
+        emit eCreateShipping(
+            1,
+            1,
+            user,
+            shippingParams.firstName,
+            shippingParams.lastName,
+            shippingParams.email,
+            shippingParams.country,
+            shippingParams.city,
+            shippingParams.stateOrProvince,
+            shippingParams.postalCode,
+            shippingParams.phone,
+            shippingParams.addressDetail
+        );
+
+        productContract.createShippingInfo(shippingParams, orderID, user);
+    }
+
+    function test_TemporaryCreateOrder() public {
+        seedCategories(10);
+        seedProducts(20);
+
+        address user = address(0);
+        productContract.addItemToCart(user, 1, 2);
+        productContract.addItemToCart(user, 2, 3);
+        productContract.addItemToCart(user, 3, 4);
+
+        CreateOrderParams[] memory params = generateCreateOrderParams();
+
+        ShippingParams memory shippingParams = generateShippingParams();
+
+        uint256 price1 = productContract.getProduct(1).params.vipPrice * 2;
+        uint256 price2 = productContract.getProduct(2).params.vipPrice * 3;
+        uint256 price3 = productContract.getProduct(3).params.vipPrice * 4;
+
+        uint256 totalPriceWithoutDiscount = price1 + price2 + price3;
+
+        bytes32 codeRef;
+        address[] memory relatedAddress;
+
+        // Expect create shipping info
+        uint256 expectOrderIdCounter = 1;
+        vm.expectEmit(true, true, true, true);
+        emit eCreateOrder(expectOrderIdCounter);
+
+        vm.expectEmit(true, true, true, true);
+        emit ESpendUsdt(
+            address(productContract),
+            totalPriceWithoutDiscount,
+            address(productContract),
+            abi.encodeCall(
+                productContract.temporaryExecuteOrder,
+                expectOrderIdCounter
+            ),
+            relatedAddress
+        );
+
+        productContract.temporaryCreateOrder(
+            params,
+            shippingParams,
+            address(0),
+            totalPriceWithoutDiscount,
+            codeRef,
+            relatedAddress
+        );
+    }
+
+    function test_TemporaryCreateOrderWithEmptyParams() public {
+        seedCategories(10);
+        seedProducts(20);
+        vm.expectRevert(bytes('{"from": "Product.sol","code": 21}'));
+
+        CreateOrderParams[] memory params;
+        ShippingParams memory shippingParams;
+        uint256 totalPriceWithoutDiscount = 0;
+        bytes32 codeRef;
+        address[] memory relatedAddress;
+        productContract.temporaryCreateOrder(
+            params,
+            shippingParams,
+            address(0),
+            totalPriceWithoutDiscount,
+            codeRef,
+            relatedAddress
+        );
+    }
+
+    function test_TemporaryCreateOrderWithProductNotFound() public {
+        seedCategories(10);
+        seedProducts(20);
+        vm.expectRevert(bytes('{"from": "Product.sol","code": 48}'));
+
+        CreateOrderParams[] memory params = generateCreateOrderParams();
+        params[0].productID = 999; // Product ID Not Found
+
+        ShippingParams memory shippingParams;
+        uint256 totalPriceWithoutDiscount = 0;
+        bytes32 codeRef;
+        address[] memory relatedAddress;
+        productContract.temporaryCreateOrder(
+            params,
+            shippingParams,
+            address(0),
+            totalPriceWithoutDiscount,
+            codeRef,
+            relatedAddress
+        );
+    }
+
+    function test_getTotalProductViewCount() public {
+        seedCategories(10);
+        seedProducts(20);
+
+        for (uint i = 0; i < 5; i++) {
+            productContract.updateViewCount(1);
+        }
+
+        for (uint i = 0; i < 10; i++) {
+            productContract.updateViewCount(7);
+        }
+
+        for (uint i = 0; i < 20; i++) {
+            productContract.updateViewCount(6);
+        }
+
+        (
+            uint256[] memory productIds,
+            uint256[] memory productCount
+        ) = productContract.getTotalProductViewCount();
+
+        assertEq(
+            productIds.length,
+            20,
+            "Product IDs array should have length 20"
+        );
+        assertEq(
+            productCount.length,
+            20,
+            "Product counts array should have length 20"
+        );
+
+        // Check the specific product view counts
+        assertEq(productCount[0], 5, "Product with ID 1 should have 5 views");
+        assertNotEq(
+            productCount[5],
+            19,
+            "Product with ID 1 should have 20 views"
+        );
+        assertEq(productCount[6], 10, "Product with ID 1 should have 10 views");
+
+        // assertEq(productCount[7], 10, "
+    }
+
+    function test_getProductTrend() public {
+        seedCategories(10);
+        seedProducts(20);
+        vm.warp(31536001);
+        for (uint i = 0; i < 5; i++) {
+            productContract.updateViewCount(1);
+        }
+
+        for (uint i = 0; i < 10; i++) {
+            productContract.updateViewCount(7);
+        }
+
+        for (uint i = 0; i < 20; i++) {
+            productContract.updateViewCount(6);
+        }
+
+        // Test for product ID 1
+        (uint256[] memory times1, uint8[] memory counts1) = productContract
+            .getProductTrend(1);
+        assertEq(times1.length, 5, "Product ID 1 should have 5 search trends");
+        assertEq(counts1.length, 5, "Product ID 1 should have 5 search trends");
+
+        // Test for product ID 7
+        (uint256[] memory times7, uint8[] memory counts7) = productContract
+            .getProductTrend(7);
+        assertEq(
+            times7.length,
+            10,
+            "Product ID 7 should have 10 search trends"
+        );
+        assertEq(
+            counts7.length,
+            10,
+            "Product ID 7 should have 10 search trends"
+        );
+
+        // Test for product ID 6
+        (uint256[] memory times6, uint8[] memory counts6) = productContract
+            .getProductTrend(6);
+
+        assertEq(
+            times6.length,
+            20,
+            "Product ID 6 should have 20 search trends"
+        );
+        assertEq(
+            counts6.length,
+            20,
+            "Product ID 6 should have 20 search trends"
+        );
+    }
+
+    function test_TemporaryCreateOrderWithProductHasMemberPriceIsLarge()
+        public
+    {
+        seedCategories(10);
+        seedProducts(20);
+        createProductParams memory productParams = generateCreateProductParams(
+            false
+        );
+        productParams.memberPrice = type(uint256).max;
+        productContract.updateProduct(1, productParams);
+        vm.expectRevert(bytes('{"from": "Product.sol","code": 49}'));
+
+        CreateOrderParams[] memory params = generateCreateOrderParams();
+        ShippingParams memory shippingParams;
+        uint256 totalPriceWithoutDiscount = 0;
+        bytes32 codeRef;
+        address[] memory relatedAddress;
+        productContract.temporaryCreateOrder(
+            params,
+            shippingParams,
+            address(0),
+            totalPriceWithoutDiscount,
+            codeRef,
+            relatedAddress
+        );
+    }
+
+    function test_TemporaryExecuteOrder() public {
+        seedCategories(10);
+        seedProducts(20);
+        address user = address(1);
+        productContract.addItemToCart(user, 1, 2);
+        productContract.addItemToCart(user, 2, 3);
+        productContract.addItemToCart(user, 3, 4);
+
+        CreateOrderParams[] memory params = generateCreateOrderParams();
+
+        ShippingParams memory shippingParams = generateShippingParams();
+
+        uint256 price1 = productContract.getProduct(1).params.vipPrice * 2;
+        uint256 price2 = productContract.getProduct(2).params.vipPrice * 3;
+        uint256 price3 = productContract.getProduct(3).params.vipPrice * 4;
+
+        uint256 totalPriceWithoutDiscount = price1 + price2 + price3;
+        bytes32 codeRef;
+        address[] memory relatedAddress;
+        uint256 orderID = productContract.temporaryCreateOrder(
+            params,
+            shippingParams,
+            user,
+            totalPriceWithoutDiscount,
+            codeRef,
+            relatedAddress
+        );
+
+        assertEq(orderID, 1);
+
+        // TODO: Call to productContract.temporaryExecuteOrder
+    }
+
+    function test_createListTrackUser() public {
+        seedCategories(10);
+        seedProducts(20);
+
+        uint256[] memory params1 = new uint256[](3);
+        uint256[] memory params2 = new uint256[](3);
+        uint256[] memory params3 = new uint256[](3);
+
+        params1[0] = 1;
+        params1[1] = 2;
+        params1[2] = 3;
+
+        params2[0] = 4;
+        params2[1] = 5;
+        params2[2] = 6;
+
+        params3[0] = 7;
+        params3[1] = 8;
+        params3[2] = 9;
+
+        productContract.createListTrackUser(
+            createListTrackUserParams("order5", 1, address(0), params1, params1)
+        );
+        productContract.createListTrackUser(
+            createListTrackUserParams("order2", 1, address(1), params2, params2)
+        );
+        productContract.createListTrackUser(
+            createListTrackUserParams("order3", 1, address(2), params3, params3)
+        );
+
+        // Verify the listTrackUserSystem entries
+        ListTrackUser[] memory systemList = productContract.getListTrackUser();
+        ListTrackUser[] memory systemList1 = productContract
+            .getListTrackUserRetailer(msg.sender);
+        assertEq(systemList.length, 2);
+        // assertEq(systemList[0].orderID, "order5");
+        // assertEq(systemList[1].orderID, "order2");
+        // assertEq(systemList[2].orderID, "order3");
+
+        // // Verify that the retailers match the products
+        // for (uint i = 0; i < params1.length; i++) {
+        //     Product memory product = productContract.getProduct(params1[i]);
+        //     ListTrackUser[] memory retailerList = productContract
+        //         .getListTrackUserRetailer(product.params.retailer);
+        //     assertEq(retailerList.length, 1);
+        //     assertEq(retailerList[0].orderID, "order5");
+        // }
+
+        // for (uint i = 0; i < params2.length; i++) {
+        //     Product memory product = productContract.getProduct(params2[i]);
+        //     ListTrackUser[] memory retailerList = productContract
+        //         .getListTrackUserRetailer(product.params.retailer);
+        //     assertEq(retailerList.length, 1);
+        //     assertEq(retailerList[0].orderID, "order2");
+        // }
+
+        // for (uint i = 0; i < params3.length; i++) {
+        //     Product memory product = productContract.getProduct(params3[i]);
+        //     ListTrackUser[] memory retailerList = productContract
+        //         .getListTrackUserRetailer(product.params.retailer);
+        //     assertEq(retailerList.length, 1);
+        //     assertEq(retailerList[0].orderID, "order3");
+        // }
+
+        // assert(listTrackUserRetailer[products[1].retailer].length == 1);
+        // assert(
+        //     listTrackUserRetailer[products[1].retailer][0].orderID == "order5"
+        // );
+        // assert(listTrackUserRetailer[products[1].retailer][0].trackType == 5);
+        // assert(
+        //     listTrackUserRetailer[products[1].retailer][0].customer ==
+        //         address(0)
+        // );
+        // assert(
+        //     listTrackUserRetailer[products[1].retailer][0].productIds[0] == 1
+        // );
+        // assert(
+        //     listTrackUserRetailer[products[1].retailer][0].productIds[1] == 2
+        // );
+        // assert(
+        //     listTrackUserRetailer[products[1].retailer][0].productIds[2] == 3
+        // );
+    }
+
+    function test_deleteListTrackUser() public {
+        seedCategories(10);
+        seedProducts(20);
+
+        uint256[] memory params1 = new uint256[](3);
+        uint256[] memory params2 = new uint256[](3);
+        uint256[] memory params3 = new uint256[](3);
+
+        params1[0] = 1;
+        params1[1] = 2;
+        params1[2] = 3;
+
+        params2[0] = 4;
+        params2[1] = 5;
+        params2[2] = 6;
+
+        params3[0] = 7;
+        params3[1] = 8;
+        params3[2] = 9;
+
+        productContract.createListTrackUser(
+            createListTrackUserParams("order5", 1, address(0), params1, params1)
+        );
+        productContract.createListTrackUser(
+            createListTrackUserParams("order2", 1, address(1), params2, params2)
+        );
+        productContract.createListTrackUser(
+            createListTrackUserParams("order3", 1, address(2), params3, params3)
+        );
+
+        // Verify the listTrackUserSystem entries
+        ListTrackUser[] memory systemList = productContract.getListTrackUser();
+        ListTrackUser[] memory systemList1 = productContract
+            .getListTrackUserRetailer(msg.sender);
+
+        productContract.deleteListTrackUser("order5");
+
+        ListTrackUser[] memory systemList2 = productContract.getListTrackUser();
+        ListTrackUser[] memory systemList3 = productContract
+            .getListTrackUserRetailer(msg.sender);
+        ListTrackUser[] memory systemList4 = productContract
+            .getListTrackUserRetailer(address(0x6969));
+
+        for (uint i = 0; i < systemList2.length; i++) {
+            assertNotEq(systemList2[i].orderID, "order5");
+        }
+
+        for (uint i = 0; i < systemList2.length; i++) {
+            assertNotEq(systemList2[i].orderID, "order5");
+        }
+    }
+
+    // function test_TrackUserActivitySystem() public {
+    //     seedCategories(10);
+    //     seedProducts(20);
+
+    //     vm.warp(currentTime);
+
+    //     productContract.createFavorite(1);
+    //     productContract.createFavorite(2);
+    //     productContract.createFavorite(3);
+    //     productContract.createFavorite(4);
+    //     productContract.createFavorite(5);
+
+    //     vm.prank(address(0x59595));
+    //     productContract.addItemToCart(address(this), 1, 5);
+    //     vm.prank(address(0x123123));
+    //     productContract.addItemToCart(address(this), 2, 7);
+    //     vm.prank(address(0x123123));
+    //     productContract.addItemToCart(address(this), 3, 8);
+    //     vm.prank(address(0x123123));
+    //     productContract.addItemToCart(address(this), 4, 9);
+    //     vm.prank(address(0x123123));
+    //     productContract.addItemToCart(address(this), 5, 1);
+
+    //     vm.prank(address(0x123123));
+    //     productContract.addItemToCart(address(0x5959), 7, 1);
+    //     vm.prank(address(0x123123));
+    //     productContract.addItemToCart(address(0x5959), 9, 5);
+
+    //     AddedToCartAndWishList[] memory test = productContract
+    //         .getListTrackUserActivitySystem();
+
+    //     vm.prank(address(0x6969));
+    //     AddedToCartAndWishList[] memory test1 = productContract
+    //         .getListTrackUserActivityRetailer();
+
+    //     vm.prank(msg.sender);
+    //     AddedToCartAndWishList[] memory test2 = productContract
+    //         .getListTrackUserActivityRetailer();
+
+    //     assertEq(test.length, 1);
+    //     assertEq(test1.length, 1);
+    //     assertEq(test2.length, 1);
+    // }
+
+    function test_RemoveTrackUserActivitySystem() public {
+        seedCategories(10);
+        seedProducts(20);
+
+        vm.warp(currentTime);
+
+        productContract.createFavorite(1);
+        productContract.createFavorite(2);
+        productContract.createFavorite(3);
+        productContract.createFavorite(4);
+        productContract.createFavorite(5);
+
+        vm.prank(address(0x59595));
+        productContract.addItemToCart(address(this), 1, 5);
+        vm.prank(address(0x123123));
+        productContract.addItemToCart(address(this), 2, 7);
+        vm.prank(address(0x123123));
+        productContract.addItemToCart(address(this), 3, 8);
+        vm.prank(address(0x123123));
+        productContract.addItemToCart(address(this), 4, 9);
+        vm.prank(address(0x123123));
+        productContract.addItemToCart(address(this), 5, 1);
+        vm.prank(address(0x123123));
+        productContract.addItemToCart(address(this), 7, 1);
+
+        // vm.prank(address(0x123123));
+        // productContract.createFavorite(7);
+
+        // vm.prank(address(0x123123));
+        // productContract.addItemToCart(address(this), 9, 5);
+        Cart memory testCart1 = productContract.getUserCart(
+            0x34A1D3fff3958843C43aD80F30b94c510645C316
+        );
+        assertEq(testCart1.id, 1);
+        // vm.prank(address(0x123123));
+        // productContract.deleteFavorite(
+        //     address(0x123123),
+        //     7,
+        //     address(0x1),
+        //     true
+        // );
+
+        vm.prank(0x34A1D3fff3958843C43aD80F30b94c510645C316);
+        productContract.deleteItemInCart(
+            0x34A1D3fff3958843C43aD80F30b94c510645C316,
+            6
+        );
+
+        Cart memory testCart = productContract.getUserCart(
+            0x34A1D3fff3958843C43aD80F30b94c510645C316
+        );
+        assertEq(testCart.id, 1);
+        AddedToCartAndWishList[] memory test = productContract
+            .getListTrackUserActivitySystem();
+
+        vm.prank(address(0x6969));
+        AddedToCartAndWishList[] memory test1 = productContract
+            .getListTrackUserActivityRetailer();
+
+        vm.prank(msg.sender);
+        AddedToCartAndWishList[] memory test2 = productContract
+            .getListTrackUserActivityRetailer();
+
+        assertEq(test.length, 1);
+        assertEq(test1.length, 1);
+        assertEq(test2.length, 1);
+    }
+
+    function test_TrackUserActivityRetailer() public {
+        seedCategories(10);
+        seedProducts(20);
+    }
+
+    function generateCreateOrderParams()
+        public
+        returns (CreateOrderParams[] memory)
+    {
+        string[] memory discountCodes;
+        CreateOrderParams memory params1 = CreateOrderParams(
+            1,
+            2,
+            1,
+            discountCodes
+        );
+
+        CreateOrderParams memory params2 = CreateOrderParams(
+            2,
+            3,
+            1,
+            discountCodes
+        );
+
+        CreateOrderParams memory params3 = CreateOrderParams(
+            3,
+            4,
+            1,
+            discountCodes
+        );
+
+        CreateOrderParams[] memory params = new CreateOrderParams[](3);
+        params[0] = params1;
+        params[1] = params2;
+        params[2] = params3;
+
+        return params;
+    }
+
+    function generateShippingParams() public returns (ShippingParams memory) {
+        ShippingParams memory shippingParams = ShippingParams({
+            firstName: "First Name",
+            lastName: "Last Name",
+            email: "meta-node-ecomerce@example.com",
+            country: "Viet Nam",
+            city: "Ho Chi Minh",
+            stateOrProvince: "Ho Chi Minh",
+            postalCode: "10001",
+            phone: "+1 (555) 123-4567",
+            addressDetail: "123 Main Street"
+        });
+
+        return shippingParams;
+    }
+
+    function generateCreateProductParams(
+        bool invalidCategory
+    ) internal returns (createProductParams memory params) {
+        // Make sure at least exist one category if invalidCategory = false
+        if (!invalidCategory) {
+            (
+                string memory testName,
+                string memory testDescription,
+                string[] memory testUrls
+            ) = seedCategory();
+            productContract.createCategory(testName, testDescription, testUrls);
+        }
+
+        params.name = "Test Product";
+        params.categoryID = 1;
+        params.retailPrice = 100;
+        params.vipPrice = 90;
+        params.memberPrice = 95;
+        params.reward = 10;
+        params.capacity = 150; // 150ml
+        params.quantity = 100;
+        params.color = "Red";
+        params.retailer = msg.sender; // Retailer's address
+        params.brandName = "Test Brand BeEarning";
+
+        string[] memory testProductUrls = new string[](2);
+        testProductUrls[0] = "http://example.com/image1.png";
+        testProductUrls[1] = "http://example.com/image2.png";
+        params.images = testProductUrls;
+
+        params.videoUrl = "http://example.com/video.mp4";
+        params.expiryTime = block.timestamp + 365 days; // Expiry after 1 year
+        params.activateTime = block.timestamp + 1 days;
+        params.isMultipleDiscount = false;
+    }
+
+    // function test_createListTrackUser() public {
+    //     // Seed products
+    //     seedCategories(10);
+    //     seedProducts(20);
+
+    //     // Define parameters
+    //     uint256[] memory productIds = new uint256[](2);
+    //     productIds[0] = 1;
+    //     productIds[1] = 2;
+
+    //     uint256[] memory quantities = new uint256[](2);
+    //     quantities[0] = 10;
+    //     quantities[1] = 20;
+
+    //     createListTrackUserParams memory params = createListTrackUserParams(
+    //         "ORDER123",
+    //         1,
+    //         address(this),
+    //         productIds,
+    //         quantities
+    //     );
+
+    //     // Create a ListTrackUser
+    //     productContract.createListTrackUser(params);
+
+    //     // Verify it was added to the system list
+    //     ListTrackUser[] memory systemList = productContract.getListTrackUser();
+    //     assertEq(systemList.length, 1);
+    //     assertEq(systemList[0].orderID, "ORDER123");
+
+    //     // Verify it was added to the retailer list
+    //     Product memory product1 = productContract.getProduct(1);
+    //     ListTrackUser[] memory retailerList = productContract
+    //         .getListTrackUserRetailer(product1.params.retailer);
+    //     assertEq(retailerList.length, 1);
+    //     assertEq(retailerList[0].orderID, "ORDER123");
+    // }
+
+    // function testGetListTrackUser() public {
+    //     // Seed products
+    //     productContract.seedProducts(3);
+
+    //     // Define parameters
+    //     uint256[] memory productIds = new uint256[](2);
+    //     productIds[0] = 1;
+    //     productIds[1] = 2;
+
+    //     uint256[] memory quantities = new uint256[](2);
+    //     quantities[0] = 10;
+    //     quantities[1] = 20;
+
+    //     ProductContract.CreateListTrackUserParams
+    //         memory params = ProductContract.CreateListTrackUserParams(
+    //             "ORDER123",
+    //             1,
+    //             address(this),
+    //             productIds,
+    //             quantities
+    //         );
+
+    //     // Create a ListTrackUser
+    //     productContract.createListTrackUser(params);
+
+    //     // Get the ListTrackUser
+    //     ProductContract.ListTrackUser[] memory systemList = productContract
+    //         .getListTrackUser();
+    //     assertEq(systemList.length, 1);
+    //     assertEq(systemList[0].orderID, "ORDER123");
+    // }
+
+    // function testGetListTrackUserRetailer() public {
+    //     // Seed products
+    //     productContract.seedProducts(3);
+
+    //     // Define parameters
+    //     uint256[] memory productIds = new uint256[](2);
+    //     productIds[0] = 1;
+    //     productIds[1] = 2;
+
+    //     uint256[] memory quantities = new uint256[](2);
+    //     quantities[0] = 10;
+    //     quantities[1] = 20;
+
+    //     ProductContract.CreateListTrackUserParams
+    //         memory params = ProductContract.CreateListTrackUserParams(
+    //             "ORDER123",
+    //             1,
+    //             address(this),
+    //             productIds,
+    //             quantities
+    //         );
+
+    //     // Create a ListTrackUser
+    //     productContract.createListTrackUser(params);
+
+    //     // Get the retailer
+    //     ProductContract.Product memory product1 = productContract.getProduct(1);
+    //     address retailer = product1.retailer;
+
+    //     // Get the ListTrackUser for the retailer
+    //     ProductContract.ListTrackUser[] memory retailerList = productContract
+    //         .getListTrackUserRetailer(retailer);
+    //     assertEq(retailerList.length, 1);
+    //     assertEq(retailerList[0].orderID, "ORDER123");
+    // }
+
+    function seedCategory()
+        internal
+        pure
+        returns (
+            string memory testName,
+            string memory testDescription,
+            string[] memory testUrls
+        )
+    {
+        testName = "Test Category";
+        testDescription = "This is a test category.";
+        testUrls = new string[](2);
+        testUrls[0] = "http://example.com/image1.png";
+        testUrls[1] = "http://example.com/image2.png";
+
+        return (testName, testDescription, testUrls);
+    }
+
+    function seedCategories(uint count) public {
+        for (uint i = 0; i < count; i++) {
+            string memory name = string.concat(
+                "Category ",
+                Strings.toString(i)
+            );
+            string memory description = string.concat(
+                "Description for Category ",
+                Strings.toString(i)
+            );
+
+            string[] memory imgs = new string[](1);
+            imgs[0] = string.concat("http://example.com/", name);
+
+            productContract.createCategory(name, description, imgs);
+        }
+    }
+
+    function seedProducts(
+        uint productCounts
+    )
+        internal
+        returns (createProductParams[] memory, string[] memory, string[] memory)
+    {
+        uint categoryCounts = 2;
+        uint brandNameCounts = 4;
+
+        string[] memory category = new string[](categoryCounts);
+        category[0] = productContract.getCategory(1).name;
+        category[1] = productContract.getCategory(2).name;
+
+        string[] memory brandNames = new string[](brandNameCounts);
+        brandNames[0] = "Brand 1";
+        brandNames[1] = "Brand 2";
+        brandNames[2] = "Brand 3";
+        brandNames[3] = "Brand 4";
+
+        uint idxCategory = 0;
+        uint idxBrandName = 0;
+        uint256 retailPrice = 1000;
+
+        createProductParams[] memory productParams = new createProductParams[](
+            productCounts
+        );
+
+        for (uint i = 0; i < productCounts; i++) {
+            string memory idxProduct = Strings.toString(i);
+            createProductParams memory params;
+            // Shuffle category, retailPrice, brand name
+            params.name = string.concat("Test Product ", idxProduct);
+            params.categoryID = idxCategory + 1;
+            params.retailPrice = retailPrice;
+            params.brandName = brandNames[idxBrandName];
+
+            params.vipPrice = retailPrice;
+            params.memberPrice = 1;
+            params.reward = 1;
+            params.capacity = 100;
+            params.quantity = 100;
+            params.color = "Red";
+            if (i % 2 == 0) {
+                params.retailer = msg.sender; // Retailer's address
+            } else {
+                params.retailer = address(0x6969);
+            }
+
+            string[] memory testProductUrls = new string[](2);
+            testProductUrls[0] = "http://example.com/image1.png";
+            testProductUrls[1] = "http://example.com/image2.png";
+            params.images = testProductUrls;
+
+            params.videoUrl = "http://example.com/video.mp4";
+            params.expiryTime = block.timestamp + 365 days; // Expiry after 1 year
+            params.activateTime = block.timestamp + 1 days;
+            params.isMultipleDiscount = false;
+
+            productContract.createProduct(params);
+
+            idxCategory = (idxCategory + 1) % categoryCounts;
+            idxBrandName = (idxBrandName + 1) % brandNameCounts;
+            retailPrice += 1e3;
+
+            productParams[i] = params;
+        }
+        return (productParams, brandNames, category);
+    }
+}

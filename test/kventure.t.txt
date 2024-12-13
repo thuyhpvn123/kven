@@ -1,0 +1,463 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.19;
+
+import {console} from "forge-std/console.sol";
+import {Test} from "forge-std/Test.sol";
+import {KventureCode} from "../contracts/GenerateCode.sol";
+import {PackageInfoStruct} from "../contracts/AbstractPackage.sol";
+import {MasterPool} from "../contracts/MasterPool.sol";
+import {USDT} from "../contracts/usdt.sol";
+import {BinaryTree} from "../contracts/BinaryTree.sol";
+import {KVenture} from "../contracts/kventure.sol";
+// import {CodePool} from "../contracts/codepool.sol";
+import {KProduct} from "../contracts/KvenProduct.sol";
+import {KOrder} from "../contracts/Order.sol";
+import {KventureNft} from "../contracts/PackageNFT.sol";
+import {Mining} from "../contracts/mocks/Mining.sol";
+import "../contracts/interfaces/IKventureProduct.sol";
+contract KventureTest is Test {
+    MasterPool public MONEY_POOL;
+    USDT public USDT_ERC;
+    KVenture public PO5;
+    KventureCode public CREATE_CODE;
+    BinaryTree public TREE;
+    // CodePool public CODE_POOL;
+    KProduct public PRODUCT;
+    KOrder public ORDER; 
+    KventureNft public NFT;
+    Mining public MINING;
+    address public Deployer = address(0x1510);
+    address public Max_out = address(0x1661);
+    address public MTN = address(0x1771);
+    address public DTBH = address(0x1881);
+    address public NSX = address(0x1991);
+    address public DAO_DT = address(0x1551);
+    uint256 ONE_USDT = 1_000_000;
+
+    // Time Config
+    uint256 public currentTime = 1706683205;
+    bytes32 codeRef;
+    // address[] public delegatesArr;
+    constructor() {
+        vm.warp(currentTime);
+        vm.startPrank(Deployer);
+        //Deploy
+        PO5 = new KVenture();
+        USDT_ERC = new USDT();
+        MONEY_POOL = new MasterPool(address(USDT_ERC));
+        TREE = new BinaryTree(address(PO5));
+        CREATE_CODE = new KventureCode();
+        // CODE_POOL = new CodePool();
+        PRODUCT = new KProduct();
+        ORDER = new KOrder();
+        NFT = new KventureNft();
+        MINING = new Mining();
+        //Call
+        //init 
+        PO5.initialize(address(USDT_ERC), address(MONEY_POOL), address(TREE), Deployer, DAO_DT, DTBH, address(CREATE_CODE), MTN, Max_out,Deployer);
+        PRODUCT.initialize(address(USDT_ERC),address(MONEY_POOL),address(CREATE_CODE),address(PO5),address(ORDER));
+        CREATE_CODE.initialize(address(USDT_ERC), address(MONEY_POOL), address(MINING), address(PRODUCT), address(NFT), address(PO5), address(MINING));
+        // MINING.initialize(_initUserHalving, _rateHalving, _percentageArr, _usdt, _history, _codeStorage, _poolCode);
+        // Set po5 is controller money pool
+        // CODE_POOL.grantRole(keccak256("POOL_CODE_CONTROLLER_ROLE"), address(CREATE_CODE));
+        NFT.grantRole(keccak256("MINTER_ROLE"), address(CREATE_CODE));
+        MONEY_POOL.setController(address(PO5));    
+        PO5.SetProduct(address(PRODUCT));
+        PO5.SetDisableCode30(true);
+        ORDER.initialize(address(PRODUCT));
+        // delegatesArr.push(address(MINING));
+        // MINING.SetDelegate(delegates,true);
+        PO5.setNSX(NSX);
+        vm.stopPrank();
+        Register();
+    }
+
+    function testDeployment() public {
+        // Kventure
+        assertGt(CREATE_CODE.deployedDate(), 0, "Err in deploy kVenture");
+    }
+
+    function mintUSDT(address user, uint256 amount) internal {
+        vm.startPrank(Deployer);
+        USDT_ERC.mintToAddress(user, amount * ONE_USDT);
+        USDT_ERC.approve(address(PO5),amount * ONE_USDT);
+        vm.stopPrank();
+    }
+
+    function Register() internal {
+        // 7 user need 7 * 160$ to register 12 month
+        mintUSDT(Deployer,800*160);
+        // Account 1 == A
+        vm.startPrank(Deployer);
+        bytes32 codeRef1;
+        PO5.Register(codeRef1, codeRef1, 1, keccak256(abi.encodePacked(block.timestamp + 1)), address(0x1));
+        vm.stopPrank();
+        vm.startPrank(address(0x1));
+        codeRef1 = PO5.GetCodeRef();
+        vm.stopPrank();
+    
+
+        // Account 2 == B
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef1, 1, keccak256(abi.encodePacked(block.timestamp + 2)), address(0x2));
+        vm.stopPrank();
+        vm.startPrank(address(0x2));
+        bytes32 codeRef2 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 3 == C
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef1, 1, keccak256(abi.encodePacked(block.timestamp + 3)), address(0x3));
+        vm.stopPrank();
+        vm.startPrank(address(0x3));
+        bytes32 codeRef3 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+
+        // Account 4 == D
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef1, 1, keccak256(abi.encodePacked(block.timestamp + 4)), address(0x4));
+        vm.stopPrank();
+        vm.startPrank(address(0x4));
+        bytes32 codeRef4 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 5 == E
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef1, 1, keccak256(abi.encodePacked(block.timestamp + 5)), address(0x5));
+        vm.startPrank(address(0x5));
+        bytes32 codeRef5 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 6 == F
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef2, 1, keccak256(abi.encodePacked(block.timestamp + 6)), address(0x6));
+        vm.startPrank(address(0x6));
+        bytes32 codeRef6 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+     
+
+        // Account 7 == G
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef2, 1, keccak256(abi.encodePacked(block.timestamp + 7)), address(0x7));
+        vm.stopPrank();
+        vm.startPrank(address(0x7));
+        // bytes32 codeRef7 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 8 == H
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef3, 1, keccak256(abi.encodePacked(block.timestamp + 8)), address(0x8));
+        vm.stopPrank();
+        vm.startPrank(address(0x8));
+        // bytes32 codeRef8 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 9 == I
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef4, 1, keccak256(abi.encodePacked(block.timestamp + 9)), address(0x9));
+        vm.stopPrank();
+        vm.startPrank(address(0x9));
+        bytes32 codeRef9 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 10 == K
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef5, 1, keccak256(abi.encodePacked(block.timestamp + 10)), address(0x10));
+        vm.stopPrank();
+        vm.startPrank(address(0x10));
+        bytes32 codeRef10 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 11 == L
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef5, 1, keccak256(abi.encodePacked(block.timestamp + 11)), address(0x11));
+        vm.stopPrank();
+        vm.startPrank(address(0x11));
+        bytes32 codeRef11 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 12 == M
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef5, 1, keccak256(abi.encodePacked(block.timestamp + 12)), address(0x12));
+        vm.stopPrank();
+        vm.startPrank(address(0x12));
+        // bytes32 codeRef12 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 13 == N
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef6, 1, keccak256(abi.encodePacked(block.timestamp + 13)), address(0x13));
+        vm.stopPrank();
+        vm.startPrank(address(0x13));
+        // bytes32 codeRef13 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 14 == O
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef9, 1, keccak256(abi.encodePacked(block.timestamp + 14)), address(0x14));
+        vm.stopPrank();
+        vm.startPrank(address(0x14));
+        bytes32 codeRef14 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 15 == P
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef10, 1, keccak256(abi.encodePacked(block.timestamp + 15)), address(0x15));
+        vm.stopPrank();
+        vm.startPrank(address(0x15));
+        // bytes32 codeRef15 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 16 == Q
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef11, 1, keccak256(abi.encodePacked(block.timestamp + 16)), address(0x16));
+        vm.stopPrank();
+        vm.startPrank(address(0x16));
+        // bytes32 codeRef16 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 17 == R
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef14, 1, keccak256(abi.encodePacked(block.timestamp + 17)), address(0x17));
+        vm.stopPrank();
+        vm.startPrank(address(0x17));
+        bytes32 codeRef17 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 18 == S
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef14, 1, keccak256(abi.encodePacked(block.timestamp + 18)), address(0x18));
+        vm.stopPrank();
+        vm.startPrank(address(0x18));
+        // bytes32 codeRef18 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 19 == T
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef14, 1, keccak256(abi.encodePacked(block.timestamp + 19)), address(0x19));
+        vm.stopPrank();
+        vm.startPrank(address(0x19));
+        // bytes32 codeRef19 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 20 == U
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef17, 1, keccak256(abi.encodePacked(block.timestamp + 20)), address(0x20));
+        vm.stopPrank();
+        vm.startPrank(address(0x20));
+        bytes32 codeRef20 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 21 == V
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef17, 1, keccak256(abi.encodePacked(block.timestamp + 21)), address(0x21));
+        vm.stopPrank();
+        vm.startPrank(address(0x21));
+        // bytes32 codeRef21 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 22 == W
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef20, 1, keccak256(abi.encodePacked(block.timestamp + 22)), address(0x22));
+        vm.stopPrank();
+        vm.startPrank(address(0x22));
+        bytes32 codeRef22 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 23 == Y
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef20, 1, keccak256(abi.encodePacked(block.timestamp + 23)), address(0x23));
+        vm.stopPrank();
+        vm.startPrank(address(0x23));
+        // bytes32 codeRef23 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 24 == Z
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef22, 1, keccak256(abi.encodePacked(block.timestamp + 24)), address(0x24));
+        vm.stopPrank();
+        vm.startPrank(address(0x24));
+        // bytes32 codeRef24 = PO5.GetCodeRef();
+        vm.stopPrank();
+
+        // Account 25 == 1
+        vm.startPrank(Deployer);
+        PO5.Register(codeRef1, codeRef3, 1, keccak256(abi.encodePacked(block.timestamp + 25)), address(0x25));
+        vm.stopPrank();
+        vm.startPrank(address(0x25));
+        // bytes32 codeRef25 = PO5.GetCodeRef();
+        vm.stopPrank();
+    }
+    function testOrder() public{
+        //admin add product
+        vm.startPrank(Deployer);
+
+        PO5.PayGoodSaleBonusWeekly(0,PO5.totalUser()-1);
+        console.log(USDT_ERC.balanceOf(address(MONEY_POOL)));
+        PRODUCT.SetAdmin(Deployer);
+        PRODUCT.adminAddProduct("100",100*ONE_USDT,117*ONE_USDT,"ao",true,120);
+        PRODUCT.adminAddProduct("500",500*ONE_USDT,607*ONE_USDT,"ao",true,120);
+        PRODUCT.adminAddProduct("1000",1_000*ONE_USDT,1207*ONE_USDT,"ao",true,120);
+        PRODUCT.adminAddProduct("5000",5_000*ONE_USDT,6027*ONE_USDT,"ao",true,120);
+        PRODUCT.adminAddProduct("10000",10_000*ONE_USDT,12077*ONE_USDT,"ao",true,120);
+        PRODUCT.adminAddProduct("20000",20_000*ONE_USDT,24_157*ONE_USDT,"ao",true,120);
+        PRODUCT.adminAddProduct("50000",50_000*ONE_USDT,60_377*ONE_USDT,"ao",true,120);
+        PRODUCT.adminAddProduct("100000",100_000*ONE_USDT,120_777*ONE_USDT,"ao",true,270);
+        Product [] memory ProductArr = new Product[](8);
+        ProductArr = PRODUCT.adminViewProduct();
+        vm.stopPrank();
+        //case1:
+        mintUSDT(address(Deployer),1_000_000*ONE_USDT);
+        vm.startPrank(address(Deployer));
+        USDT_ERC.approve(address(PRODUCT),1_000_000*ONE_USDT);
+
+        // address L order 4 products 100    
+        bytes32[] memory codeHash0L = new bytes32[](4);
+        codeHash0L= getCodeHash(4,100);      
+        codeHashes[0] = codeHash0L;
+        OrderInput[] memory input = OrderInput({
+            id        : ProductArr[0].id,
+            quantity  : 4,
+            lock      : true,
+            codeHashes: codeHashes,
+            delegate  : address(0)
+        }); 
+        PRODUCT.order(input,address(0x11));
+        // PRODUCT.order(idArr,quaArr,lockArr,codeHashes,delegates,address(0x11));
+
+        PO5.PayGoodSaleBonusWeekly(0,PO5.totalUser()-1);
+        console.log(USDT_ERC.balanceOf(address(MONEY_POOL)) - PO5.DT_BALANCE());
+
+        // address M order 8 products 500
+        // idArr[0] = ProductArr[1].id;
+        // quaArr[0]=8;
+        // bytes32[] memory codeHash0M = new bytes32[](8);
+        // codeHash0M= getCodeHash(8,500); 
+        // codeHashes[0] = codeHash0M;            
+        // PRODUCT.order(idArr,quaArr,lockArr,codeHashes,delegates,address(0x12));
+        bytes32[] memory codeHash0M = new bytes32[](8);
+        codeHash0L= getCodeHash(8,500);      
+        codeHashes[0] = codeHash0L;
+        OrderInput[] memory input = OrderInput({
+            id        : ProductArr[1].id,
+            quantity  : 8,
+            lock      : true,
+            codeHashes: codeHashes,
+            delegate  : address(0)
+        }); 
+        PRODUCT.order(input,address(0x12));
+        console.log(USDT_ERC.balanceOf(address(MONEY_POOL)) - PO5.DT_BALANCE());
+
+        //address N order 9 products 1000
+        // idArr[0] = ProductArr[2].id;
+        // quaArr[0]=9;
+        // bytes32[] memory codeHash0N = new bytes32[](9);
+        // codeHash0N= getCodeHash(9,1000); 
+        // codeHashes[0] = codeHash0N;            
+        // PRODUCT.order(idArr,quaArr,lockArr,codeHashes,delegates,address(0x13));
+        
+        console.log(USDT_ERC.balanceOf(address(MONEY_POOL)) - PO5.DT_BALANCE());
+
+        //address O order 8 products 5_000
+        idArr[0] = ProductArr[3].id;
+        quaArr[0]=8;
+        bytes32[] memory codeHash0O = new bytes32[](8);
+        codeHash0O= getCodeHash(8,5000); 
+        codeHashes[0] = codeHash0O;            
+        PRODUCT.order(idArr,quaArr,lockArr,codeHashes,delegates,address(0x14));
+
+        //address P order 2 products 10_000
+        idArr[0] = ProductArr[4].id;
+        quaArr[0]=2;
+        bytes32[] memory codeHash0P = new bytes32[](2);
+        codeHash0P= getCodeHash(2,10000); 
+        codeHashes[0] = codeHash0P;            
+        PRODUCT.order(idArr,quaArr,lockArr,codeHashes,delegates,address(0x15));
+        console.log(USDT_ERC.balanceOf(address(MONEY_POOL)) - PO5.DT_BALANCE());
+        
+        //address Q order 6 products 20_000
+        idArr[0] = ProductArr[5].id;
+        quaArr[0]=6;
+        bytes32[] memory codeHash0Q = new bytes32[](6);
+        codeHash0Q= getCodeHash(6,10000); 
+        codeHashes[0] = codeHash0Q;            
+        PRODUCT.order(idArr,quaArr,lockArr,codeHashes,delegates,address(0x16));
+
+        orderProduct(ProductArr,idArr,quaArr,lockArr,codeHashes,delegates);
+        PO5.PayGoodSaleBonusWeekly(0,PO5.totalUser()-1);
+        console.log(USDT_ERC.balanceOf(address(MONEY_POOL)) - PO5.DT_BALANCE());
+        // console.log("totalSaleBonus A:",PO5.GetUserInfo(address(0x1)).totalSaleBonus); //
+        // console.log("totalSaleBonus B:",PO5.GetUserInfo(address(0x2)).totalSaleBonus);
+        // console.log("totalSaleBonus E:",PO5.GetUserInfo(address(0x5)).totalSaleBonus); //
+        // console.log("totalSaleBonus F:",PO5.GetUserInfo(address(0x6)).totalSaleBonus);
+        // console.log("totalSaleBonus I:",PO5.GetUserInfo(address(0x9)).totalSaleBonus);
+        // console.log("totalSaleBonus K:",PO5.GetUserInfo(address(0x10)).totalSaleBonus);
+        // console.log("totalSaleBonus L:",PO5.GetUserInfo(address(0x11)).totalSaleBonus);
+        // console.log("totalSaleBonus O:",PO5.GetUserInfo(address(0x14)).totalSaleBonus); //
+
+        // console.log("totalGoodSaleBonus A:",PO5.totalRevenues(address(0x1)));
+        // console.log("totalGoodSaleBonus B:",PO5.totalRevenues(address(0x2)));
+        // console.log("totalGoodSaleBonus C:",PO5.totalRevenues(address(0x3)));
+        // console.log("totalGoodSaleBonus D:",PO5.totalRevenues(address(0x4)));
+        // console.log("totalGoodSaleBonus E:",PO5.totalRevenues(address(0x5))); 
+        // console.log("totalGoodSaleBonus F:",PO5.totalRevenues(address(0x6))); 
+        // console.log("totalGoodSaleBonus G:",PO5.totalRevenues(address(0x7)));
+        // console.log("totalGoodSaleBonus H:",PO5.totalRevenues(address(0x8)));
+        // console.log("totalGoodSaleBonus I:",PO5.totalRevenues(address(0x9))); 
+        // console.log("totalGoodSaleBonus K:",PO5.totalRevenues(address(0x10))); 
+        // console.log("totalGoodSaleBonus L:",PO5.totalRevenues(address(0x11))); 
+        // console.log("totalGoodSaleBonus E:",PO5.totalRevenues(address(0x12))); 
+        // console.log("totalGoodSaleBonus O:",PO5.totalRevenues(address(0x14))); 
+
+
+
+
+        //check sale bonus
+        // assertEq(
+        //     PO5.GetUserInfo(address(0x1)).totalSaleBonus, 
+        //     6231*ONE_USDT + 24924*ONE_USDT/100,  //50%*(12_077-10_000)*6 direct + 2%*(12_077-10_000)*6
+        //     "Error balance PB"
+        // ); 
+        vm.stopPrank();
+
+        
+    }
+    function orderProduct(   //tach ra function rieng vi stack too deep
+        Product[] memory ProductArr,
+        bytes32[] memory idArr,
+        uint256[] memory quaArr,
+        bool[] memory lockArr,
+        bytes32[][] memory codeHashes,
+        address[] memory delegates
+        )internal{
+
+        //address R order 1 products 50_000
+        idArr[0] = ProductArr[6].id;
+        quaArr[0]=1;
+        bytes32[] memory codeHash0R = new bytes32[](1);
+        codeHash0R= getCodeHash(1,50000); 
+        codeHashes[0] = codeHash0R;            
+        PRODUCT.order(idArr,quaArr,lockArr,codeHashes,delegates,address(0x17));
+
+        //address S order 4 products 100_000
+        idArr[0] = ProductArr[7].id;
+        quaArr[0]=4;
+        bytes32[] memory codeHash0S = new bytes32[](4);
+        codeHash0S= getCodeHash(4,100000); 
+        codeHashes[0] = codeHash0S;            
+        PRODUCT.order(idArr,quaArr,lockArr,codeHashes,delegates,address(0x18));
+        uint256 bal = USDT_ERC.balanceOf(NSX);
+        console.log("NSX:",bal);
+        uint256 bal1 = USDT_ERC.balanceOf(Max_out);
+        console.log("Max_out:",bal1);
+    }
+    function getCodeHash(uint256 amount,uint256 price) public pure returns(bytes32[] memory){
+        bytes32[] memory codeHashArr = new bytes32[](amount);
+        for (uint i=0;i< amount;i++){
+            codeHashArr[i]= keccak256(abi.encodePacked(i+amount+price));
+        }
+        return codeHashArr;
+    }
+}
